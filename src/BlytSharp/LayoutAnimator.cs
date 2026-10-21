@@ -14,9 +14,10 @@ namespace BlytSharp;
 /// <item>FLVI (visibility): 0;</item>
 /// <item>FLVC (vertex colours): 0-15 top-left/top-right/bottom-left/bottom-right × RGBA, 16 pane alpha;</item>
 /// <item>FLMC (material colours): 0-3 black RGBA, 4-7 white RGBA (0-255);</item>
-/// <item>FLTP (texture pattern): the curve's index is the texture map, the value an index into the animation's texture list.</item>
+/// <item>FLTP (texture pattern): the curve's index is the texture map, the value an index into the animation's texture list;</item>
+/// <item>FLTS (texture SRT): the curve's index is the material's texture SRT, targets 0-1 translate x/y, 2 rotate, 3-4 scale x/y.</item>
 /// </list>
-/// Texture SRT (FLTS), indirect (FLIM) and the other groups are not applied.
+/// Indirect (FLIM) and the other groups are not applied.
 /// </remarks>
 public sealed class LayoutAnimator
 {
@@ -25,7 +26,7 @@ public sealed class LayoutAnimator
     private readonly Dictionary<string, Pane> _panes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Material> _materials = new(StringComparer.Ordinal);
     private readonly Dictionary<Pane, (Vector3 T, Vector3 R, Vector2 S, float W, float H, byte Flags, byte Alpha, Rgba8[]? Vc)> _paneOrig = [];
-    private readonly Dictionary<Material, (MaterialColor? Black, MaterialColor? White, ushort[] Tex)> _matOrig = [];
+    private readonly Dictionary<Material, (MaterialColor? Black, MaterialColor? White, ushort[] Tex, TexSrt[] Srt)> _matOrig = [];
     private readonly List<string>? _texturesOrig;
 
     public int FrameCount => Math.Max(1, (int)(_anim.Info?.FrameSize ?? 1));
@@ -45,14 +46,17 @@ public sealed class LayoutAnimator
         {
             if (_panes.TryGetValue(content.Name, out var p) && content.Targets.Any(t => t.Magic is "FLPA" or "FLVI" or "FLVC"))
                 _paneOrig.TryAdd(p, (p.Translate, p.Rotate, p.Scale, p.Width, p.Height, p.Flags, p.Alpha, (p as PicturePane)?.VertexColors.ToArray()));
-            if (_materials.TryGetValue(content.Name, out var m) && content.Targets.Any(t => t.Magic is "FLMC" or "FLTP"))
-                _matOrig.TryAdd(m, (m.Colors.Count > 0 ? Copy(m.Colors[0]) : null, m.Colors.Count > 1 ? Copy(m.Colors[1]) : null, m.TexMaps.Select(t => t.TextureIndex).ToArray()));
+            if (_materials.TryGetValue(content.Name, out var m) && content.Targets.Any(t => t.Magic is "FLMC" or "FLTP" or "FLTS"))
+                _matOrig.TryAdd(m, (m.Colors.Count > 0 ? Copy(m.Colors[0]) : null, m.Colors.Count > 1 ? Copy(m.Colors[1]) : null,
+                    m.TexMaps.Select(t => t.TextureIndex).ToArray(), m.TexSrts.Select(Copy).ToArray()));
         }
         AnimatedPanes = _paneOrig.Count;
         AnimatedMaterials = _matOrig.Count;
     }
 
     private static MaterialColor Copy(MaterialColor c) => new() { IsFloat = c.IsFloat, Byte = c.Byte, Float = c.Float };
+
+    private static TexSrt Copy(TexSrt s) => new() { Translate = s.Translate, Rotate = s.Rotate, Scale = s.Scale };
 
     public void Restore()
     {
@@ -66,6 +70,7 @@ public sealed class LayoutAnimator
             if (o.Black != null && m.Colors.Count > 0) m.Colors[0] = Copy(o.Black);
             if (o.White != null && m.Colors.Count > 1) m.Colors[1] = Copy(o.White);
             for (int i = 0; i < m.TexMaps.Count && i < o.Tex.Length; i++) m.TexMaps[i].TextureIndex = o.Tex[i];
+            for (int i = 0; i < m.TexSrts.Count && i < o.Srt.Length; i++) m.TexSrts[i] = Copy(o.Srt[i]);
         }
         if (_texturesOrig != null) _layout.Textures = _texturesOrig.ToList();
     }
@@ -89,6 +94,7 @@ public sealed class LayoutAnimator
                         case "FLVC" when _panes.TryGetValue(content.Name, out var p): VertexColor(p, curve.Target, v); break;
                         case "FLMC" when _materials.TryGetValue(content.Name, out var m): MaterialColour(m, curve.Target, v); break;
                         case "FLTP" when _materials.TryGetValue(content.Name, out var m): TexturePattern(m, curve.Index, (int)MathF.Round(v)); break;
+                        case "FLTS" when _materials.TryGetValue(content.Name, out var m): TextureSrt(m, curve.Index, curve.Target, v); break;
                     }
                 }
     }
@@ -107,6 +113,20 @@ public sealed class LayoutAnimator
             case 7: p.Scale = p.Scale with { Y = v }; break;
             case 8: p.Width = v; break;
             case 9: p.Height = v; break;
+        }
+    }
+
+    private static void TextureSrt(Material m, int index, int target, float v)
+    {
+        if (index >= m.TexSrts.Count) return;
+        TexSrt s = m.TexSrts[index];
+        switch (target)
+        {
+            case 0: s.Translate = s.Translate with { X = v }; break;
+            case 1: s.Translate = s.Translate with { Y = v }; break;
+            case 2: s.Rotate = v; break;
+            case 3: s.Scale = s.Scale with { X = v }; break;
+            case 4: s.Scale = s.Scale with { Y = v }; break;
         }
     }
 
