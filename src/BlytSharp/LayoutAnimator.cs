@@ -5,7 +5,9 @@ namespace BlytSharp;
 /// <summary>Plays a BFLAN on a BFLYT by writing the animated values for a frame into the layout's panes and materials.</summary>
 /// <remarks>
 /// It holds the file's values of every pane and material the animation touches: <c>Apply</c> puts them back before
-/// writing a frame, so frames don't accumulate, and <c>Restore</c> leaves the layout as the file has it. Curves are
+/// writing a frame, so frames don't accumulate, and <c>Restore</c> leaves the layout as the file has it. To play several
+/// animations on one layout, restore them all, then apply each in order without restoring: a later one wins where two
+/// animate the same value. Curves are
 /// constant, step or Hermite (value + slope keys). Targets, by animation group:
 /// <list type="bullet">
 /// <item>FLPA (pane SRT): 0-2 translate x/y/z, 3-5 rotate x/y/z, 6-7 scale x/y, 8-9 size w/h;</item>
@@ -68,9 +70,10 @@ public sealed class LayoutAnimator
         if (_texturesOrig != null) _layout.Textures = _texturesOrig.ToList();
     }
 
-    public void Apply(float frame)
+    // Without restore, only this animation's curves are written over what is there, so several can be applied in turn.
+    public void Apply(float frame, bool restore = true)
     {
-        Restore();
+        if (restore) Restore();
         foreach (var content in _anim.Info?.Contents ?? [])
             foreach (var target in content.Targets)
                 foreach (var curve in target.Curves)
